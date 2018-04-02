@@ -159,6 +159,7 @@ var LexicalContext = function (outer) {
 /// might move to a lexical environment, and this will become a simple bytecode array.
 function FunctionDefinition(outer) {
 	this.args = new SymbolTable();
+	this.vars = new SymbolTable();
 	this.regs = new SymbolTable();
 	this.labels = new LabelTable();
 	this.instructions = [];
@@ -193,6 +194,7 @@ function FunctionDefinition(outer) {
 	this.output = function (out) {
 		// note that name and index are output by the module.
 		outputUInt32(out, this.args.next);
+		outputUInt32(out, this.vars.next);
 		outputUInt32(out, this.regs.next);
 		this.instructions.forEach(function (instruction) {
 			instruction.output(out);
@@ -207,12 +209,20 @@ function FunctionDefinition(outer) {
 		return this.instructions[this.instructions.length - 1];
 	}
 
-	this.localIndex = function (name) {
+	this.localArgIndex = function (name) {
 		var index = this.regs.lookup(name);
 		if (index) {
 			return index + this.args.next;
 		}
 		return this.args.lookup(name);
+	}
+
+	this.localVarIndex = function (name) {
+		var index = this.regs.lookup(name);
+		if (index){
+			return index + this.vars.next;
+		}
+		return this.vars.lookup(name);
 	}
 
 	this.placeLabel = function (label) {
@@ -379,16 +389,27 @@ function FirstPassCodeGen() {
 		}
 	}
 
-	this.emitPushFromVar = function (func, name) {
-		var index = func.localIndex(name);
+	this.emitPushFromArg = function (func, name) {
+		var index = func.localArgIndex(name);
+		func.instructions.push(new Instruction("PUSH_FROM_ARG", index));
+	}
+
+	this.emitPopIntoArg = function (func, name) {
+		var index = func.localArgIndex(name);
+		func.instructions.push(new Instruction("POP_INTO_ARG", index));
+	}
+
+	this.emitPushFromArg = function (func, name) {
+		var index = func.localVarIndex(name);
 		func.instructions.push(new Instruction("PUSH_FROM_VAR", index));
 	}
 
-	this.emitPopIntoVar = function (func, name) {
-		var index = func.localIndex(name);
+	this.emitPopIntoArg = function (func, name) {
+		var index = func.localVarIndex(name);
 		func.instructions.push(new Instruction("POP_INTO_VAR", index));
 	}
 
+//
 	this.handleFunctionDeclaration = function (func, declaration) {
 		var inner = this.module.functions.newFunctionDefinition(declaration.id.name, func);
 		declaration.params.forEach(function (param) {
@@ -407,6 +428,7 @@ function FirstPassCodeGen() {
 	};
 
 	this.handleAssignmentExpression = function (func, expression) {
+		//todo: why Object.freeze()?
 		var AssignmentOperatorCode = Object.freeze({
 			"+=": "INT_ADD",
 			"-=": "INT_SUB",
@@ -425,22 +447,25 @@ function FirstPassCodeGen() {
 				this.handle(func, expression.right);
 			}
 			func.instructions.push(new Instruction("DUPLICATE"));
-			this.emitPopIntoVar(func, expression.left.name);
+			this.emitPopIntoArg(func, expression.left.name);
 
 			if (expression.isParameter == true) {
-				this.emitPushFromVar(func, expression.left.name);
+				this.emitPushFromArg(func, expression.left.name);
 			}
+			if (expression.isParameter )
 			return;
 		}
 		this.handle(func, expression.right);
 	};
 
 	this.handleVariableDeclaration = function (func, declaration) {
+		//todo
 		/// composed of potentially multiple variables.
 		this.handleBody(func, declaration.declarations);
 	}
 
 	this.handleVariableDeclarator = function (func, declarator) {
+		//todo
 		var id = func.regs.get(declarator.id.name);
 		if (declarator.init) {
 			this.handle(func, declarator.init);

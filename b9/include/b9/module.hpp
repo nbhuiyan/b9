@@ -20,33 +20,38 @@ struct FunctionDef {
   // Copy Constructor
   FunctionDef(const std::string& name, std::uint32_t index,
               const std::vector<Instruction>& instructions,
-              std::uint32_t nargs = 0, std::uint32_t nregs = 0)
+              std::uint32_t nargs = 0, std::uint32_t nregs = 0,
+              std::uint32_t nvars = 0)
       : name{name},
         index{index},
         instructions{instructions},
         nargs{nargs},
-        nregs{nregs} {}
+        nregs{nregs},
+        nvars {}
 
   // Move Constructor
   FunctionDef(const std::string& name, std::uint32_t index,
               std::vector<Instruction>&& instructions, std::uint32_t nargs = 0,
-              std::uint32_t nregs = 0)
+              std::uint32_t nregs = 0, nvars = 0)
       : name{name},
         index{index},
         instructions{std::move(instructions)},
         nargs{nargs},
-        nregs{nregs} {}
+        nregs{nregs},
+        nvars{nvars} {}
 
   // Function Data
   std::string name;
   uint32_t index;
   std::uint32_t nargs;
   std::uint32_t nregs;
+  std::uint32_t nvars;
+
   std::vector<Instruction> instructions;
 };
 
 inline void operator<<(std::ostream& out, const FunctionDef& f) {
-  out << "(function \"" << f.name << "\" " << f.nargs << " " <<  f.nregs;
+  out << "(function \"" << f.name << "\" " << f.nargs << " " <<  f.nregs << " " << f.nvars;
   std::size_t i = 0;
   for (auto instruction : f.instructions) {
     out << std::endl << "  " << i << "  " << instruction;

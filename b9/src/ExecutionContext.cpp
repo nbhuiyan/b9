@@ -80,6 +80,7 @@ Om::Value ExecutionContext::callJitFunction(JitFunction jitFunction,
 StackElement ExecutionContext::interpret(const std::size_t functionIndex) {
   auto function = virtualMachine_->getFunction(functionIndex);
   auto argsCount = function->nargs;
+  auto varsCount = function->nvars;
   auto jitFunction = virtualMachine_->getJitAddress(functionIndex);
 
   if (jitFunction) {
@@ -90,6 +91,7 @@ StackElement ExecutionContext::interpret(const std::size_t functionIndex) {
   const Instruction *instructionPointer = function->instructions.data();
 
   StackElement *args = stack_.top() - function->nargs;
+  StackElement *vars = (stack_.top() - function->nargs) - function->nvars;
   stack_.pushn(function->nregs);
 
   while (*instructionPointer != END_SECTION) {
@@ -116,11 +118,10 @@ StackElement ExecutionContext::interpret(const std::size_t functionIndex) {
         doDrop();
         break;
       case ByteCode::PUSH_FROM_VAR:
-        doPushFromVar(args, instructionPointer->parameter());
+        doPushFromVar(vars, instructionPointer->parameter());
         break;
       case ByteCode::POP_INTO_VAR:
-        // TODO bad name, push or pop?
-        doPushIntoVar(args, instructionPointer->parameter());
+        doPopIntoVar(vars, instructionPointer->parameter());
         break;
       case ByteCode::INT_ADD:
         doIntAdd();
@@ -182,6 +183,12 @@ StackElement ExecutionContext::interpret(const std::size_t functionIndex) {
       case ByteCode::SYSTEM_COLLECT:
         doSystemCollect();
         break;
+      case ByteCode::PUSH_FROM_ARG:
+        doPushFromArg(args, instructionPointer->parameter());
+        break;
+      case ByteCode::POP_INTO_ARG:
+        doPopIntoArg(args, instructionPointer->parameter());
+        break;
       default:
         assert(false);
         break;
@@ -220,10 +227,18 @@ void ExecutionContext::doDuplicate() {
 void ExecutionContext::doDrop() { stack_.pop(); }
 
 void ExecutionContext::doPushFromVar(StackElement *args, Parameter offset) {
+  stack_.push(vars[offset]);
+}
+
+void ExecutionContext::doPopIntoVar(StackElement *args, Parameter offset) {
+  vars[offset] = stack_.pop();
+}
+
+void ExecutionContext::doPushFromArg(StackElement *args, Parameter offset) {
   stack_.push(args[offset]);
 }
 
-void ExecutionContext::doPushIntoVar(StackElement *args, Parameter offset) {
+void ExecutionContext::doPopIntoArg(StackElement *args, Parameter offset) {
   args[offset] = stack_.pop();
 }
 
@@ -392,6 +407,14 @@ void ExecutionContext::doCallIndirect() {
 void ExecutionContext::doSystemCollect() {
   std::cout << "SYSTEM COLLECT!!!" << std::endl;
   OMR_GC_SystemCollect(omContext_.omrVmThread(), 0);
+}
+
+void ExecutionContext::doPushFromArg() {
+ //TODO
+}
+
+void ExecutionContext::doPopIntoArg() {
+ //TODO
 }
 
 }  // namespace b9

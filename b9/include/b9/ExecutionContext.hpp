@@ -58,7 +58,7 @@ class ExecutionContext {
 
   void doPushFromVar(StackElement *args, Parameter offset);
 
-  void doPushIntoVar(StackElement *args, Parameter offset);
+  void doPopIntoVar(StackElement *args, Parameter offset);
 
   void doIntAdd();
 
@@ -95,6 +95,10 @@ class ExecutionContext {
   void doCallIndirect();
 
   void doSystemCollect();
+
+  void doPushFromArg();
+
+  void doPopIntoArg();
 
   Om::RunContext omContext_;
   OperandStack stack_;

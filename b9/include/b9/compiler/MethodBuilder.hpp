@@ -52,6 +52,10 @@ class MethodBuilder : public TR::MethodBuilder {
 
   void storeVarIndex(TR::IlBuilder *builder, int varindex, TR::IlValue *value);
 
+  TR::IlValue *loadArgIndex(TR::IlBuilder *builder, int argIndex);
+
+  void storeArgIndex(TR::IlBuilder *builder, int argIndex, TR::IlValue *value);
+
   // Bytecode Handlers
 
   void handle_bc_push_constant(TR::BytecodeBuilder *builder,
@@ -64,6 +68,10 @@ class MethodBuilder : public TR::MethodBuilder {
                                TR::BytecodeBuilder *nextBuilder);
   void handle_bc_pop_into_var(TR::BytecodeBuilder *builder,
                               TR::BytecodeBuilder *nextBuilder);
+  void handle_bc_pop_into_arg(TR::BytecodeBuilder *builder,
+                              TR::BytecodeBuilder *nextBuilder);
+  void handle_bc_push_from_arg(TR::BytecodeBuilder *builder,
+                              TR::BytecodeBuilder *nextBuilder);                                                
   void handle_bc_sub(TR::BytecodeBuilder *builder,
                      TR::BytecodeBuilder *nextBuilder);
   void handle_bc_add(TR::BytecodeBuilder *builder,

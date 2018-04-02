@@ -293,6 +293,15 @@ void MethodBuilder::storeVarIndex(TR::IlBuilder *builder, int varindex,
   }
 }
 
+
+TR::IlValue *loadArgIndex(TR::IlBuilder *builder, int argIndex){
+  //todo
+}
+
+void storeArgIndex(TR::IlBuilder *builder, int argIndex, TR::IlValue *value){
+  //todo
+}
+
 bool MethodBuilder::generateILForBytecode(
     const FunctionDef *function,
     std::vector<TR::BytecodeBuilder *> bytecodeBuilderTable,
@@ -342,6 +351,16 @@ bool MethodBuilder::generateILForBytecode(
       break;
     case ByteCode::POP_INTO_VAR:
       storeVarIndex(builder, instruction.parameter(), pop(builder));
+      if (nextBytecodeBuilder)
+        builder->AddFallThroughBuilder(nextBytecodeBuilder);
+      break;
+    case ByteCode::PUSH_FROM_ARG:
+      push(builder, loadArgIndex(builder, instruction.parameter()));
+      if (nextBytecodeBuilder)
+        builder->AddFallThroughBuilder(nextBytecodeBuilder);
+      break;
+    case ByteCode::POP_INTO_ARG:
+      storeArgIndex(builder, instruction.parameter(), pop(builder));
       if (nextBytecodeBuilder)
         builder->AddFallThroughBuilder(nextBytecodeBuilder);
       break;

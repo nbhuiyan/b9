@@ -38,7 +38,8 @@ void readFunctionData(std::istream &in, FunctionDef &functionDef) {
   readString(in, functionDef.name);
   bool ok = readNumber(in, functionDef.index) &&
             readNumber(in, functionDef.nargs) &&
-            readNumber(in, functionDef.nregs);
+            readNumber(in, functionDef.nregs) &&
+            readNumber(in, functionDef.nvars;
   if (!ok) {
     throw DeserializeException{"Error reading function data"};
   }

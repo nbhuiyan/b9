@@ -81,6 +81,11 @@ enum class ByteCode : RawByteCode {
   CALL_INDIRECT = 0x23,
 
   SYSTEM_COLLECT = 0x24,
+
+  PUSH_FROM_ARG = 0x25,
+
+  POP_INTO_ARG = 0x26,
+
 };
 
 inline const char *toString(ByteCode bc) {
@@ -143,6 +148,10 @@ inline const char *toString(ByteCode bc) {
       return "call_indirect";
     case ByteCode::SYSTEM_COLLECT:
       return "system_collect";
+    case ByteCode::PUSH_FROM_ARG:
+      return "push_from_arg";
+    case ByteCode::POP_INTO_ARG:
+      return "pop_into_arg";
     default:
       return "UNKNOWN_BYTECODE";
   }
