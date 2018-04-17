@@ -38,11 +38,11 @@ Base9 has several major components that we'll discuss throughout the course of t
   <img src="./assets/images/b9overview.png" width="100%"/>
 </figure>
 
-The Base9 Overview Diagram depicts the Ahead-of-Time compilation unit and the [Virtual Machine] unit. Base9 uses a primitive subset of JavaScript as its frontend language. The Ahead-of-Time unit runs the JavaScript source code through our frontend compiler. The frontend compiler outputs a binary module. The binary module is passed to the deserializer, which converts it to a C++ data structure that we've named "Module", and which will henceforth be refered to as the "in memory Module".
+The Base9 Overview Diagram depicts the Ahead-of-Time compilation unit and the [Virtual Machine] unit. Base9 uses a primitive subset of JavaScript as its frontend language. The Ahead-of-Time unit runs the JavaScript source code through our frontend compiler. The frontend compiler outputs a binary module. The binary module is passed to the deserializer, which converts it to a C++ data structure that we've named "Module", and which will henceforth be refered to as the "in-memory Module".
 
 [Virtual Machine]: ./Dictionary.md#virtual-machine
 
-The Virtual Machine unit is comprised of the [Interpreter] and the [JIT]. The in memory Module is passed to the VM, which runs the [bytecodes] of the program.
+The Virtual Machine unit is comprised of the [Interpreter] and the [JIT]. The in-memory Module is passed to the VM, which runs the [bytecodes] of the program.
 
 [Interpreter]: ./Dictionary.md#interpreter
 [JIT]: ./Dictionary.md#jit-compiler
@@ -64,7 +64,7 @@ We'll discuss each of the above components in detail in the upcoming sections.
 
 ### Frontend Language
 
-Our front-end language is a subset of JavaScript. Let's have a look at some code:
+Our front-end language is a primitive subset of JavaScript. Currently, it can only operate on integers. Let's have a look at some code:
  
  ```js
 function b9main() {
@@ -72,7 +72,7 @@ function b9main() {
 }
 ```
 
-Above is a classic program that we all know and love, Hello, World! It can be found in [test/hello.src]. `b9main()` is using one of the three base9 [primitive functions] (from our primitive f:unction library in [b9/js_compiler/b9stdlib.src]). Specifically, it's using `b9PrintString` to print to console. Currently, base9 is only capable of operating on integers. It can print strings, but it can't (yet) perform operations on them.
+Above is a classic program that we all know and love, Hello, World! It can be found in [test/hello.src]. `b9main` is the entry point to our program, like `int main` in C. The base9 compiler includes a tiny library of functions with every compiled program. The library is called b9stdlib and it can be found in [b9/js_compiler/b9stdlib.src]. Each of the functions in b9stdlib call base9 [primitive functions]. In the Hello, World! program, `b9main` uses `b9PrintString` from b9stdlib to write text to the console.
 
 [test/hello.src]: https://github.com/b9org/b9/blob/master/test/hello.src
 [primitive functions]: ./Dictionary.md#primitive-function
@@ -93,7 +93,11 @@ For a brief overview of the front-end compiler, as well as a more in depth look 
 
 [Frontend Compiler and Binary Format](./FrontendAndBinaryMod.md)
 
-Let’s convert the Hello, World! program to its binary format by running it through the frontend compiler. Making sure you're in the root directory, run:
+Let’s convert the Hello, World! program to its binary format by running it through the frontend compiler. Hello, World! can be found in [b9/test/hello.src].
+
+[b9/test/hello.src]: https://github.com/b9org/b9/blob/master/test/hello.src
+
+Making sure you're in the root directory, run:
 
 `node js_compiler/compile.js test/hello.src hello.b9mod`
 
@@ -111,14 +115,22 @@ The above command will run the JavaScript compiler on `test/hello.src` and outpu
 
 ## The Base9 Backend
 
+<figure class="image">
+  <figcaption>VM Design</figcaption>
+  <img src="./assets/images/vmDesign.png" width="100%"/>
+</figure>
+
+The above diagram shows the components of the Virtual Machine in detail. The VM takes the binary module (as produced by the frontend compiler) and employs the deserializer to convert it into a C++ data structure (called the in-memory Module) which contains the bytecodes. After the conversion, the VM will employ either the Interpreter or the JIT to run the program. The Interpreter processes the bytecodes directly and one at a time. The JIT compiler converts the bytecodes to native machine code and returns a pointer to the start of that code. Once a program is JIT compiled, the bytecodes are no longer interpreted one at a time, but rather the JIT compiled version is executed. Currently, when we wish to use the JIT, we employ user flags to tell the VM to JIT compile an entire program and to interpret nothing.
+
+
 ### The Deserializer
 
-The base9 [deserializer] at [b9/src/deserialize.cpp] is responsible for taking the binary module (as output by the frontend compiler), and converting it into the in memory Module to be run by the VM.
+The base9 [deserializer] at [b9/src/deserialize.cpp] is responsible for taking the binary module (as output by the frontend compiler), and converting it into the in-memory Module to be run by the VM.
 
 [deserializer]: ./Dictionary.md#deserializer
 [b9/src/deserialize.cpp]: https://github.com/b9org/b9/blob/master/b9/src/deserialize.cpp
 
-The deserializer is used in base9 in two different ways. Firstly, it is used by the VM to convert a binary module to an in memory Module. Secondly, it is used by the disassembler at [b9/b9disasm/b9disasm.cpp]. The disassembler employs the base9 deserializer to convert a binary module into a human readable interpretation. It is primarily used as a debugging tool. Click the link below to learn more:
+The deserializer is used in base9 in two different ways. Firstly, it is used by the VM to convert a binary module to an in-memory Module. Secondly, it is used by the disassembler at [b9/b9disasm/b9disasm.cpp]. The disassembler employs the base9 deserializer to convert a binary module into a human readable interpretation. It is primarily used as a debugging tool. Click the link below to learn more:
 
 [b9/b9disasm/b9disasm.cpp]: https://github.com/b9org/b9/blob/master/b9disasm/b9disasm.cpp
 [Base9 Disassembler](./Disassembler.md)
@@ -127,33 +139,21 @@ Let's run the disassembler using the binary module we just generated! Navigate t
 
 `b9disasm/b9disasm ../hello.b9mod`
 
-You should now be looking at a human readable version of the Hello, World! program as represented by its bytecodes:
+You should now be looking at a human readable version of the Hello, World! program as represented by [base9 assembly]. You'll notice that the first three functions (`b9PrintString`, `b9PrintNumber`, and `b9PrintStack`) are the b9stdlib functions that are included in each compiled program. They can be ignored. The important part is the `b9main` function. Let's have a look at the transition between the JavaScript and the base9 assembly:
+
+[base9 assembly]: ./Dictionary.md#base9-assembly
+
+```js
+function b9main() {
+  b9PrintString("Hello World!");
+}
+```
+
+<figure class="image">
+  <img src="./assets/images/downArrow.png" width="100%"/>
+</figure>
 
 ```
-(function "b9PrintString" 1 0
-  0  (push_from_var 0)
-  1  (primitive_call 0)
-  2  (drop)
-  3  (int_push_constant 0)
-  4  (function_return)
-  5  (end_section))
-
-(function "b9PrintNumber" 1 0
-  0  (push_from_var 0)
-  1  (primitive_call 1)
-  2  (drop)
-  3  (int_push_constant 0)
-  4  (function_return)
-  5  (end_section))
-
-(function "b9PrintStack" 1 0
-  0  (push_from_var 0)
-  1  (primitive_call 2)
-  2  (drop)
-  3  (int_push_constant 0)
-  4  (function_return)
-  5  (end_section))
-
 (function "b9main" 0 0
   0  (str_push_constant 0)
   1  (function_call 0)
@@ -161,21 +161,13 @@ You should now be looking at a human readable version of the Hello, World! progr
   3  (int_push_constant 0)
   4  (function_return)
   5  (end_section))
-
-(string "Hello World!")
 ```
 
-The first three functions are the base9 primitives that we mentioned earlier, which can be ignored. Let's take a look at the direct conversion between the JavaScript and the bytecodes of the Hello, World! function:
-
-<figure class="image">
-  <img src="./assets/images/jsToBC.png" width="100%"/>
-</figure>
-
-Stepping through the bytecodes:
-- `str_push_constant` pushes the string "Hello, World!" onto the stack
+Stepping through the bytecodes as represented by the base9 assembly:
+- `str_push_constant` pushes the string "Hello, World!" onto the operand stack
 - `function_call` does the call to `b9PrintString`
-- `drop` drops the top value from the stack (being used to remove the unused return value of the `b9PrintString`)
-- `int_push_constant` pushes 0 onto the stack as the return value of `b9main`
+- `drop` drops the top value from the operand stack (being used to remove the unused return value of the `b9PrintString`)
+- `int_push_constant` pushes 0 onto the operand stack as the return value of `b9main`
 - `function_return` does the actual return
 - `end_section` is the end-of-bytecodes marker, a safety feature should the interpreter continue running after the return
 
@@ -184,30 +176,22 @@ Stepping through the bytecodes:
 
 Now that we've seen the conversion between JavaScript and bytecodes, let's explore the base9 bytecode design.
 
-The base9 instruction set is stack oriented, which allows for straight-forward compilation and simple VM implementation.  One advantage of a stack-based instruction set over a register-based model is that stack-based instructions are smaller, having no need for a register immediate. One disadvantage is that the total number of instructions is larger. Since all instructions operate on the stack, the stack can be thought of as the VM's memory.
+The base9 instruction set is stack oriented, which allows for straight-forward compilation and simple VM implementation.  One advantage of a stack-based instruction set over a register-based model is that stack-based instructions are smaller, having no need for a register immediate. One disadvantage is that the total number of instructions is larger. Since all instructions operate on the operand stack, the operand stack can be thought of as the VM's memory.
 
-All of the base9 bytecodes are fixed-width. This puts constraints on what we can encode in the instructions, but it simplifies instruction decoding and jumps. Below is the layout of a single base9 instruction:
+All of the base9 bytecodes are fixed-width. This puts constraints on what we can encode in the instructions, but it simplifies instruction decoding and jumps.
 
-```
-|0000-0000 0000-0000 0000-0000 0000-0000
-|---------| bytecode (8 bits)
-          |-----------------------------| parameter (24 bits)
-```
-
-Note that for many base9 bytecodes, the parameter is unused and left as zero.
-
-One final thing to mention is that the base9 instruction set is untyped. This means that the bytecodes can operate on values of varying types. The way this works is by popping the operands off the stack, checking their types, and doing the correct operation once the type is known.  
+One final thing to mention is that the base9 instruction set is untyped. This means that the bytecodes can operate on values of varying types. The way this works is by popping the operands off the operand stack, checking their types, and doing the correct operation once the type is known.  
 
 All base9 bytecodes are defined in [b9/include/b9/instructions.hpp].
 
 [b9/include/b9/instructions.hpp]: https://github.com/b9org/b9/blob/master/b9/include/b9/instructions.hpp
 
 
-### The Stack
+### The Operand Stack
 
-As recently mentioned, the base9 bytecodes are stack oriented. Let's take at what happens with the stack during a simple addition function:
+As recently mentioned, the base9 bytecodes are stack oriented. Let's take at what happens with the operand stack during a simple addition function:
 
-```js
+```javascript
 function simple_add() {
   return 5 + 6;
 } 
@@ -219,23 +203,23 @@ The following diagrams display the bytecodes generated from the above "simple_ad
 
 **SP** = Stack Pointer
 
+Push 5 onto the operand stack:
 <figure class="image">
-  <figcaption>PUSH 5 ONTO THE STACK</figcaption>
   <img src="./assets/images/bcStack1.png" width="100%"/>
 </figure>
 
+Push 6 onto the operand stack:
 <figure class="image">
-  <figcaption>PUSH 6 ONTO THE STACK</figcaption>
   <img src="./assets/images/bcStack2.png" width="100%"/>
 </figure>
 
+Pop 5 and 6 off that stack, add them, push the result to the operand stack:
 <figure class="image">
-  <figcaption>POP TOP TWO VALUES, ADD, PUSH RESULT</figcaption>
   <img src="./assets/images/bcStack3.png" width="100%"/>
 </figure>
 
+Pop and return the result from the operand stack:
 <figure class="image">
-  <figcaption>POP AND RETURN RESULT</figcaption>
   <img src="./assets/images/bcStack4.png" width="100%"/>
 </figure>
 
@@ -257,22 +241,35 @@ Hello World!
 
 The `=> (integer 0)` is the return code of the program. It will be 0 unless something has gone wrong during execution.
 
-<figure class="image">
-  <figcaption>VM Design</figcaption>
-  <img src="./assets/images/vmDesign.png" width="100%"/>
-</figure>
-
-The above diagram shows the components of the Virtual Machine Design in greater detail. The VM takes the binary module (as produced by the frontend compiler) and employs the deserializer to convert it into a C++ data structure (called the in memory Module) which contains the bytecodes. After the conversion, the VM will employ either the Interpreter or the JIT to run the program. The Interpreter processes the bytecodes directly and one at a time. The JIT compiler converts the bytecodes to native machine code and returns a pointer to the start of that code. Once a program is JIT compiled, the bytecodes are no longer interpreted one at a time, but rather the JIT compiled version is executed. Currently, when we wish to use the JIT, we employ user flags to tell the VM to JIT compile an entire program and to interpret nothing. We'll leave the JIT for now and focus on the interpreter.
-
 
 ### The Interpreter
 
-The interpreter's job is to take a sequence of bytecodes and match each of them with a corresponding C++ function. The relationship between bytecodes and corresponding C++ functions is one-to-one. Earlier, when we ran our Hello, World! program, it ran by default on the interpreter. The VM will always run the interpreter by default. The base9 interpreter is very simple, consisting of a while-loop and switch statement to iterate a sequence of bytecodes. 
+The interpreter's job is to take a sequence of bytecodes and match each of them with a corresponding C++ function. The relationship between bytecodes and corresponding C++ functions is one-to-one. Earlier, when we ran our Hello, World! program, it ran by default on the interpreter. The VM will always run the interpreter by default. The base9 interpreter is very simple, consisting of a while-loop and switch statement to iterate a sequence of bytecodes. Let's take a look at some pseudocode for the interpreter:
 
-<figure class="image">
-  <figcaption>The Interpreter</figcaption>
-  <img src="./assets/images/interpreter.png" width="100%"/>
-</figure>
+```
+interpreter (function) {
+  for all bytecodes in the function {
+    switch(bytecode) {
+      case functionCall
+        doFunctionCall()
+      case functionReturn
+        doFunctionReturn()
+      
+      ...
+      
+      case integerAdd
+        dointegerAdd()
+      case integerSubtract
+        doIntegerSubtract()
+      
+      ...
+
+    }
+  }
+}
+```
+
+Hopefully the pseudocode has convinced you that the interpreter is actually quite easy to understand. Essentially, it's a loop around a switch statement, matching bytecodes to corresponding C++ functions.
 
 ```
 
@@ -296,7 +293,7 @@ The entry point for our `b9run` program can be found in [b9run/main.cpp]. Let's 
 
 [b9run/main.cpp]: https://github.com/b9org/b9/blob/master/b9run/main.cpp
 
-```c++
+```cpp
 int main(int argc, char* argv[]) {
   OMR::Om::ProcessRuntime runtime;
   RunConfig cfg;
@@ -310,7 +307,8 @@ int main(int argc, char* argv[]) {
 
   try {
     run(runtime, cfg);
-    
+  }
+
   ...
 
   exit(EXIT_SUCCESS);
@@ -321,7 +319,7 @@ The first thing that occurs in `main` is the instatiation of a `ProcessRuntime` 
 
 `RunConfig` is a struct (inside of [b9run/main.cpp]), which sets up the base9 global configuration:
 
-```c++
+```cpp
 struct RunConfig {
   b9::Config b9;
   const char* moduleName = "";
@@ -339,7 +337,7 @@ When we ran `b9run`, we could have provided our command with a number of options
 From the build directory, run `b9run/b9run -help` for a complete listing of options.
 
 
-The `RunConfig` struct begins with a default configuration, but may later be modified according to the command line options provided by the user. As you can see in the `main` function, the next thing to occur is argument parsing. This is where the `RunConfig` struct may be modified. The final thing to occur in the `main` function is a call to `run(runtime, cfg)`.
+The `RunConfig` struct begins with a default configuration, but may later be modified according to the command line options provided by the user. As you can see in the `main` function, the next thing to occur is argument parsing. This is where the `RunConfig` struct may be modified. The final thing to occur in the `main` function is a call to `run(runtime, cfg)`. It's important to wrap this call in a `try` block, because there are plenty of things that could go wrong when running the VM, and proper error handling is next to godliness.
 
 
 ### The `run` function
@@ -366,14 +364,14 @@ static void run(OMR::Om::ProcessRuntime& runtime, const RunConfig& cfg) {
 }
 ```
 
-This is where the `VirtualMachine` class is instantiated. This class can be found [b9/include/b9/VirtualMachine.hpp]. The `run` function deserializes a binary module which has been compiled from JavaScript source code and loads the resulting in memory Module. Next, it checks if JIT has been turned on. If yes, the bytecodes are JIT compiled using the `generateCode` function. If no, the VM obtains the main function of the program and begins interpreting.
+This is where the `VirtualMachine` class is instantiated. This class can be found [b9/include/b9/VirtualMachine.hpp]. The `run` function deserializes a binary module which has been compiled from JavaScript source code and loads the resulting in-memory Module. Next, it checks if JIT has been turned on. If yes, the bytecodes are JIT compiled using the `generateCode` function. If no, the VM obtains the main function of the program and begins interpreting.
 
 
-### The in memory `Module`
+### The in-memory `Module`
 
-The in memory Module, as mentioned earlier, is created by deserializing a [binary module]. Let's have a look at the in memory Module:
+The in-memory Module, as mentioned earlier, is created by deserializing a [binary module]. Let's have a look at the in-memory Module:
 
-```c++
+```cpp
 struct Module {
   std::vector<FunctionDef> functions;
   std::vector<std::string> strings;
@@ -396,27 +394,10 @@ The Module contains only 2 fields; a `functions` vector, and a `strings` vector.
 
 Now let's take a look at our `FunctionDef` struct: 
 
-```c++
+```cpp
 struct FunctionDef {
-  // Copy Constructor
-  FunctionDef(const std::string& name, std::uint32_t index,
-              const std::vector<Instruction>& instructions,
-              std::uint32_t nargs = 0, std::uint32_t nregs = 0)
-      : name{name},
-        index{index},
-        instructions{instructions},
-        nargs{nargs},
-        nregs{nregs} {}
 
-  // Move Constructor
-  FunctionDef(const std::string& name, std::uint32_t index,
-              std::vector<Instruction>&& instructions, std::uint32_t nargs = 0,b9/include/b9/VirtualMachine.hpp
-              std::uint32_t nregs = 0)
-      : name{name},
-        index{index},
-        instructions{std::move(instructions)},
-        nargs{nargs},
-        nregs{nregs} {}
+  ...
 
   // Function Data
   std::string name;
@@ -427,16 +408,74 @@ struct FunctionDef {
 };
 ```
 
-The fields of the `FunctionDef` are the name of the function, the index of the function in the function vector, the number of arguments, the number of registers, and the `Instructions` vector (which contains the bytecodes). 
+The fields of the `FunctionDef` are the name of the function, the index of the function in the function vector, the number of arguments, the number of registers, and the `Instructions` vector (which contains the bytecodes).
+
+### The base9 Instruction Set
+
+In base, the virtual machine executes it’s own instruction language, and functions are compiled into sequences of instructions. Each instruction is a 32-bit little endian value, which encodes an opcode (sometimes called a bytecode or pcode), and an optional parameter. The opcode is the most significant byte of the instruction. The opcode tells the VM what operation to perform to execute the instruction. The opcode is one of the special predefined constants that the VM understands. Example opcodes are add, subtract, jump, and function-call.
+
+The parameter encodes constant data about the instruction. For example, a jump instruction encodes it’s jump target as an offset in the immediate. The parameter is a signed value stored in the lower 24 bits of the instruction.
+
+The layout of the instructions is:
+
+```
+|0000-0000 0000-0000 0000-0000 0000-0000
+|---------| bytecode (8 bits)
+          |-----------------------------| parameter (24 bits)
+```
+
+Instructions are encoded as:
+
+```cpp
+std::uint32_t instruction := (opcode << 24) | (parameter &0xFFFFFF);
+```
+
+To decode an instructions opcode:
+
+```cpp
+std::uint8_t opcode = instruction >> 24;
+```
+
+Decoding the parameter is a little more involved. Since the parameter is signed, we must sign extend the 24-bit value as we convert it to 32 bits.
+
+```cpp
+std::uint32_t parameter = instruction & 0xFFFFFF;
+bool is_signed = parameter & (1 << 23);
+if (is_signed)
+  parameter |= 0xFF << 24;
+```
+
+
+### The `OperandStack`
+
+The `OperandStack` class is what we have previously referred to as [the operand stack]. It's definition can be found in [b9/include/b9/OperandStack.hpp]. The `OperandStack` class contains functions for using/manipulating the operand stack, and it's fields are as follows: 
+
+[the operand stack]: #the-operand-stack
+[b9/include/b9/OperandStack.hpp]: https://github.com/b9org/b9/blob/master/b9/include/b9/OperandStack.hpp
+
+```cpp
+StackElement *top_;
+StackElement stack_[SIZE];
+```
+
+The operand stack acts as the VM's memory bank, storing all of the values needed by the instructions. To see how the operand stack operates during a simple add function, see [the operand stack] section above. As you've likely noticed, base9 is using a `StackElement` type, which is defined in [b9/include/b9/OperandStack.hpp] as follows:
+
+[b9/include/b9/OperandStack.hpp]: https://github.com/b9org/b9/blob/master/b9/include/b9/OperandStack.hpp
+
+```cpp
+using StackElement = Om::Value;
+```
+
+The StackElement type comes from Om, an OMR toolkit for dealing with garbage collected objects. A `StackElement` is a 64-bit value that encodes a type and a payload. The value can hold a double, a GC reference, a valid memory pointer, or a 32-bit integer.
 
 
 ### The Interpreter Loop
 
-The interpreter is implemented in [b9/src/ExecutionContext.cpp]. Let's take a look at the code:
+The interpreter is implemented in [b9/src/ExecutionContext.cpp]. It uses the `OperandStack` to store the values needed by the instructions. When a function call occurs, the arguments to the function are pushed onto the operand stack before entering the function. Once the function is entered, the arguments are popped off and used. Let's take a look at the code:
 
 [b9/src/ExecutionContext.cpp]: https://github.com/b9org/b9/blob/master/b9/src/ExecutionContext.cpp
 
-```c++
+```cpp
 StackElement ExecutionContext::interpret(const std::size_t functionIndex) {
   auto function = virtualMachine_->getFunction(functionIndex);
   auto argsCount = function->nargs;
@@ -456,11 +495,11 @@ StackElement ExecutionContext::interpret(const std::size_t functionIndex) {
 
 ```
 
-This first bit of the `interpret` function deals with some initial setup. The single parameter is `functionIndex`, which we use to get the individual function we wish to interpret. The interpreter then checks if the particular function has previously been JIT compiled. If it has, we use that function instead, and return from the interpreter. If it hasn't, the `instructionPointer` is initialized to the start of the instruction sequence, the arguments are collected from the top of the stack, and storage for local variables is allocated on the stack.
+As you can see, the second last line is popping the functions arguments off the operand stack. Let's back up. The first bit of the `interpret` function deals with some initial setup. The single parameter is `functionIndex`, which we use to get the individual function we wish to interpret. The interpreter then checks if the particular function has previously been JIT compiled. If it has, we use that function instead, and return from the interpreter. If it hasn't, the `instructionPointer` is initialized to the start of the instruction sequence, the arguments are collected from the top of the operand stack, and storage for local variables is allocated on the operand stack.
 
 Now let's take a look at the while-loop and switch-statement.
 
-```c++
+```cpp
   while (*instructionPointer != END_SECTION) {
     switch (instructionPointer->byteCode()) {
 
@@ -483,9 +522,9 @@ Now let's take a look at the while-loop and switch-statement.
 
 ```
 
-We've excluded much of the interpreter loop for simplicity, but we'll discuss a couple of the cases to give you an idea of how it works. Above we have the `FUNCTION_RETURN` bytecode case and the `INT_ADD` bytecode case. In the `FUNCTION_RETURN` case, the top of the stack (which is storing the return value of the function) is popped and stored in the `result` variable. The stack is then restored and the return value is returned. This is the only bytecode in the interpreter loop that returns a value, which makes sense, because this bytecode is only reached at the end of a function when there are no more bytecodes to process. The `INT_ADD` bytecode case calls `doIntAdd()`, which is a simple C++ function:
+We've excluded much of the interpreter loop for simplicity, but we'll discuss a couple of the cases to give you an idea of how it works. Above we have the `FUNCTION_RETURN` bytecode case and the `INT_ADD` bytecode case. In the `FUNCTION_RETURN` case, the top of the operand stack (which is storing the return value of the function) is popped and stored in the `result` variable. the operand stack is then restored and the return value is returned. This is the only bytecode in the interpreter loop that returns a value, which makes sense, because this bytecode is only reached at the end of a function when there are no more bytecodes to process. The `INT_ADD` bytecode case calls `doIntAdd()`, which is a simple C++ function:
 
-```c++
+```cpp
 void ExecutionContext::doIntAdd() {
   std::int32_t right = stack_.pop().getInteger();
   std::int32_t left = stack_.pop().getInteger();
@@ -508,7 +547,7 @@ To run the VM using just the interpreter:
 
 A reminder that the above command should be run from the `/build` directory.
 
-To conclude this section, let's briefly walk over the components we've covered thus far. JavaScript is the front-end language. It is compiled using the frontend compiler, which employs Esprima. The output of the frontend compiler is the binary module. The binary module is consumed by the deserializer in [b9/src/deserialize.cpp], which converts it into the in memory Module to be run by the VM. The VM is itself a C++ class, and can be found in [b9/include/b9/VirtualMachine.hpp]. Once instantiated, the VM loads and runs the Module through the interpreter in [b9/src/ExecutionContext.cpp].
+To conclude this section, let's briefly walk over the components we've covered thus far. JavaScript is the front-end language. It is compiled using the frontend compiler, which employs Esprima. The output of the frontend compiler is the binary module. The binary module is consumed by the deserializer in [b9/src/deserialize.cpp], which converts it into the in-memory Module to be run by the VM. The VM is itself a C++ class, and can be found in [b9/include/b9/VirtualMachine.hpp]. Once instantiated, the VM loads and runs the Module through the interpreter in [b9/src/ExecutionContext.cpp].
 
 [b9/src/deserialize.cpp]: https://github.com/b9org/b9/blob/master/b9/src/deserialize.cpp
 [b9/include/b9/VirtualMachine.hpp]: https://github.com/b9org/b9/blob/master/b9/include/b9/VirtualMachine.hpp
@@ -544,7 +583,7 @@ The above diagram depicts the base9 components in yellow. These are the componen
 
 ### JitBuilder
 
-[JitBuilder] is tool inside of OMR that allows the user to programmatically describe the [intermediate language] (IL) that implements the semantics of the bytecodes. Using JitBuilder to employ the OMR JIT is not strictly necessary, but without it, one would require a deep understanding of JIT Compilation. JitBuilder makes it possible for someone without the background to easily plug-in and use the JIT compiler for their runtime.
+[JitBuilder] is an interface to the JIT compiler technology in OMR. It's designed to bootstrap a native-code JIT compiler for interpreted methods, and it allows the user to programatically describe the [intermediate language] (IL) that implements the semantics of the bytecodes. Using JitBuilder to employ the OMR JIT is not strictly necessary, but without it, one would require a deep understanding of JIT Compilation. JitBuilder makes it possible for someone without a background in compilers to easily plug-in and use the JIT compiler for their runtime.
 
 [JitBuilder]: https://developer.ibm.com/open/2016/07/19/jitbuilder-library-and-eclipse-omr-just-in-time-compilers-made-easy/
 [intermediate language]: ./Dictionary.md#intermediate-language
@@ -561,42 +600,130 @@ The above diagram depicts the base9 components in yellow. These are the componen
 
 ## Integrate the JIT Compiler
 
-### The JIT Compiler 
+### Run the JIT
 
-As we mentioned earlier, our JIT compiler is made possible by [OMR] and [JitBuilder]. We keep OMR in our [third_party] directory as a [git submodule]. JitBuilder exists as part of OMR. The JIT compiler is one of the two ways the VM can run the module (the other being the interpreter). Where the interpreter processes the bytecodes directly and one at a time, the JIT compiler converts the bytecodes to native machine code and returns a pointer to the start of the code. Currently, we employ user flags to tell the VM to JIT compile an entire program and to interpret nothing. We aim to add profiling to base9, which will allow the VM to record statistics about the program and to make decisions about which individual functions to JIT compile.
-
-To run a fully JIT compiled program:
-
-`./b9run/b9run -jit <binary_module>`
-
-A reminder that the above command should be run from the `/build` directory.
+As mentioned earlier, our JIT compiler is made possible by [OMR] and [JitBuilder]. OMR is kept in the [third_party] directory as a [git submodule]. JitBuilder is part of OMR. The JIT compiler is one of the two ways the VM can run the module (the other being the interpreter). Where the interpreter processes the bytecodes directly and one at a time, the JIT compiler converts the bytecodes to native machine code and returns a pointer to the start of the compiled code. Currently, we employ user flags to tell the VM to JIT compile an entire program and to interpret nothing. We aim to add profiling to base9, which will allow the VM to record statistics about the program and to make decisions about which individual functions to JIT compile.
 
 [OMR]: https://eclipse.org/omr/
 [JitBuilder]: https://developer.ibm.com/open/2016/07/19/jitbuilder-library-and-eclipse-omr-just-in-time-compilers-made-easy/
 [third_party]: https://github.com/b9org/b9/tree/master/third_party
 [git submodule]: ./Dictionary.md#git-submodule
 
-Let's run our Hello, World! program using the JIT:
+So how do we run a fully JIT compiled program? Let's head over to the `build/` directory and run:
+
+`./b9run/b9run -help`
+
+You should see the following output:
+
+```
+Usage: b9run [<option>...] [--] <module> [<arg>...]
+   Or: b9run -help
+Jit Options:
+  -jit:          Enable the jit
+  -directcall:   make direct jit to jit calls
+  -passparam:    Pass arguments in CPU registers
+  -lazyvmstate:  Only update the VM state as needed
+Run Options:
+  -function <f>: Run the function <f> (default: b9main)
+  -loop <n>:     Run the program <n> times (default: 1)
+  -inline <n>:   Set the jit's max inline depth (default: 0)
+  -debug:        Enable debug code
+  -verbose:      Run with verbose printing
+  -help:         Print this help message
+```
+
+As you can see, there's a "Jit Options" section. Here we have a `-jit` option, as well as `-directcall`, `-passparam`, and `-lazyvmstate`. The latter three options are JIT optimizations that we'll explore in the [JIT Features] section. For now, the `-jit` option is all we need. Let's run the JIT with our Hello, World! binary module.
+
+[JIT Features]: #jit-features
 
 `./b9run/b9run -jit ../hello.b9mod`
 
-The output should look exactly the same as when run with the interpreter.
+The output should look exactly the same as when run with the interpreter. So what's the difference? The difference isn't really apparant when running a tiny program like Hello, World! But what if we run a larger program? Looking back at the output from `-help`, notice the `-function` and `-loop` options. `-function` allows us to run a particular function from within our program, and `-loop` lets us loop over that particular function a certain number of times. Let's run fibonacci with the `time` command, first using the interpreter, and then the JIT. The intepreter will run the bytecodes, but the JIT will take those bytecodes and turn them into an optimizable format. It then searches for known patterns which it can optimize into a something smaller. Then, once the code has been optimized, it is converted into native binary machine code. Now, this optimized, native machine code will be run every time the function or program is run. So let's go ahead and make some real comparisons. 
+
+Run fibonacci with the interpreter:
+
+`time ./b9run/b9run -loop 1000 -function fib test/fib.b9mod 20 > log`
+
+Run fibonacci with the JIT:
+
+`time ./b9run/b9run -loop 1000 -jit -function fib test/fib.b9mod 20 > log`
+
+<figure class="image">
+  <img src="./assets/images/interpreterVsJit.png" width="100%"/>
+</figure>
+
+That's a 9x speedup, and that isn't including any of the [JIT Optimizations].
+
+[JIT Optimizations]: #jit-features
+
+### JIT Design
+
+In general, compilers are vast and complex with many layers and hidden depths. It can take years to become well versed in compiler technology, and that discourages many developers from doing projects with them. That's why we built base9. We want to share the OMR technology with language developers and show them how adding a JIT compiler to a runtime can be easy! Let's start by taking a quick look at the JIT Design.
+
+<figure class="image">
+  <figcaption>Phases of the JIT</figcaption>
+  <img src="./assets/images/bcToNativeCode.png" width="100%"/>
+</figure>
+
+The above diagram shows the transition between the language bytecodes and the native machine code. The code must undergo several phases of transformation. The bytecodes are given to the intermediate language [(IL) generator] to be transformed into the IL. The IL is then further optimized via the [optimizer]. Optimized IL is then passed to the [code generator] for it's final converstion into [native machine code]. 
+
+[(IL) generator]: ./Dictionary.md#il-generator
+[optimizer]: ./Dictionary.md#optimizer
+[code generator]: ./Dictionary.md#code-generator
+[native machine code]: ./Dictionary.md#native-machine-code
 
 
-### Plugging in the JIT
+### IL Generation and JitBuilder
 
-With our OMR submodule, and with the correct `#include`'s in our base9 headers, using OMR and JitBuilder functionality is easy! Let's start by taking a look at [b9/src/Compiler.hpp], where we define our `Compiler` class. The `Compiler` class constructor takes a `VirtualMachine` class and a `Config` struct. It's called as follows:
+In the above sections we covered the translation of JavaScript to bytecodes, and how base9 stores these bytecodes in binary format before eventually deserializing them into the in-memory module. The above diagram shows that the JIT takes the bytecodes as input, and returns native machine code as output. The first phase in this transition is IL Generation. Translating bytecodes to IL would normally be a big pain in the butt, but luckily, this is exactly what JitBuilder is for! JitBuilder is a tool for building an intermediate language from a set of bytecodes. Let's talk about how to use JitBuilder.
 
-[b9/src/Compiler.hpp]: https://github.com/b9org/b9/blob/master/b9/include/b9/compiler/Compiler.hpp
+The first step is to call the `initializeJit()` function:
 
-`Compiler(VirtualMachine &virtualMachine, const Config &cfg);`
+```cpp
+if (cfg_.jit) {
+  auto ok = initializeJit();
+  if (!ok) {
+    throw std::runtime_error{"Failed to init JIT"};
+  }
+}
+```
 
-For more information on instantiating the `VirtualMachine` class, see the [run function] section above. The `Config` struct is in [b9/include/b9/VirtualMachine.hpp] and is defined as follows:
+We make this call in the `VirtualMachine` constructor in [b9/src/core.cpp]. `initializeJit()` sets up the OMR JIT by allocating a code cache for compiled methods. Conversely, the `VirtualMachine` deconstructor (also in [b9/src/core.cpp]) calls `shutdownJit()`, which frees the code cache of compiled methods:
 
-[run function]: #the-run-function
+[b9/src/core.cpp]: https://github.com/b9org/b9/blob/master/b9/src/core.cpp
+
+```cpp
+VirtualMachine::~VirtualMachine() noexcept {
+  if (cfg_.jit) {
+    shutdownJit();
+  }
+}
+```
+
+The next thing you'll need to consider for your runtime is the `MethodBuilder` class. `MethodBuilder` lives inside of OMR, but we've defined our own `MethodBuilder` class in base9 which inherits from the original. Let's open up [b9/include/b9/compiler/MethodBuilder.hpp] and have a look.
+
+[b9/include/b9/compiler/MethodBuilder.hpp]: https://github.com/b9org/b9/blob/master/b9/include/b9/compiler/MethodBuilder.hpp
+
+Take a look at the base9 `MethodBuilder` class. It's fields are as follows:
+
+```cpp
+VirtualMachine &virtualMachine_;
+const GlobalTypes &globalTypes_;
+const Config &cfg_;
+const std::size_t functionIndex_;
+int32_t maxInlineDepth_;
+int32_t firstArgumentIndex = 0;
+```
+
+The `MethodBuilder` constructor takes the `VirtualMachine` and `functionIndex_` as parameters, and it sets the rest of the fields using existing data. We learned how to instantiate the `VirtualMachine` class in the [`run` function] section, and we know how to access the current function's index using the `Module` class's `getFunctionIndex(const std::string& name)` method. 
+
+[`run` function]: #the-run-function  
+
+The `Config` struct is in [b9/include/b9/VirtualMachine.hpp], and is defined as follows:
+
 [b9/include/b9/VirtualMachine.hpp]: https://github.com/b9org/b9/blob/master/b9/include/b9/VirtualMachine.hpp
 
-```
+```cpp
 struct Config {
   std::size_t maxInlineDepth = 0;  //< The JIT's max inline depth
   bool jit = false;                //< Enable the JIT
@@ -608,35 +735,15 @@ struct Config {
 };
 ```
 
-We use the `Config` class to configure the JIT with a number of settings, all of which are set upon running the VM. Take a moment to run `./b9run/b9run -help` from the `/build` directory, and note that all of the the fields of the `Config` struct are displayed as configurable options.
+We use the `Config` struct to configure the JIT with a number of settings, all of which are set upon running the VM. Recall running `./b9run/b9run -help`. All of the fields in the `Config` struct are configurable options that can be used when running the JIT.
 
-Let's have a look at the `Compiler` class:
+The `maxInlineDepth_` variable from the `MethodBuilder` constructor is set to 0 by default in the `Config` struct. It can also be set using the `-inline` command line option. Base9 uses a single array, `argsAndTempNames`, to store the arguments and temporaries of both the outer and inlined functions. The `firstArgumentIndex` variable is used to track and access from this array. 
 
-```
-class Compiler {
- public:
-  Compiler(VirtualMachine &virtualMachine, const Config &cfg);
-  JitFunction generateCode(const std::size_t functionIndex);
-
-  const GlobalTypes &globalTypes() const { return globalTypes_; }
-
-  TR::TypeDictionary &typeDictionary() { return typeDictionary_; }
-
-  const TR::TypeDictionary &typeDictionary() const { return typeDictionary_; }
-
- private:
-  TR::TypeDictionary typeDictionary_;
-  const GlobalTypes globalTypes_;
-  VirtualMachine &virtualMachine_;
-  const Config &cfg_;
-};
-```
-
-`TR::TypeDictionary` allows us to define which types are supported by the frontend language. It's used by the `MethodBuilder` class in OMR JitBuilder. We define our supported types in [b9/include/b9/compiler/GlobalTypes.hpp] using `TR::TypeDictionary` as shown below:
+The final field in `MethodBuilder` is `globalTypes_`. The `GlobalTypes` class uses TR::TypeDictionary` to define the supported types. See [b9/include/b9/compiler/GlobalTypes.hpp] for the `GlobalTypes` class, as shown below:
 
 [b9/include/b9/compiler/GlobalTypes.hpp]: https://github.com/b9org/b9/blob/master/b9/include/b9/compiler/GlobalTypes.hpp
 
-```c++
+```cpp
 /// A collection of basic, built in types.
 class GlobalTypes {
  public:
@@ -659,11 +766,114 @@ class GlobalTypes {
 };
 ```
 
+Now that we've gone through the nuances of using the `MethodBuilder` constructor, lets take a look in [b9/src/MethodBuilder.cpp]. Let's scroll down to the `generateILForBytecode` function: 
+
+[b9/src/MethodBuilder.cpp]: https://github.com/b9org/b9/blob/master/b9/src/MethodBuilder.cpp
+
+```cpp
+switch (instruction.byteCode()) {
+
+  ...
+
+  case ByteCode::POP_INTO_VAR:
+    storeVarIndex(builder, instruction.parameter(), pop(builder));
+    if (nextBytecodeBuilder)
+      builder->AddFallThroughBuilder(nextBytecodeBuilder);
+    break;
+  
+  ...
+  
+  case ByteCode::DUPLICATE: {
+    auto x = pop(builder);
+    push(builder, x);
+    push(builder, x);
+    if (nextBytecodeBuilder) {
+      builder->AddFallThroughBuilder(nextBytecodeBuilder);
+    }
+  } break;
+```
+
+
+### The `Compiler` class
+
+Let's start by taking a look at [b9/src/Compiler.hpp], where we define our `Compiler` class: 
+
+[b9/src/Compiler.hpp]: https://github.com/b9org/b9/blob/master/b9/include/b9/compiler/Compiler.hpp
+
+```cpp
+class Compiler {
+ public:
+  Compiler(VirtualMachine &virtualMachine, const Config &cfg);
+  JitFunction generateCode(const std::size_t functionIndex);
+
+  const GlobalTypes &globalTypes() const { return globalTypes_; }
+
+  TR::TypeDictionary &typeDictionary() { return typeDictionary_; }
+
+  const TR::TypeDictionary &typeDictionary() const { return typeDictionary_; }
+
+ private:
+  TR::TypeDictionary typeDictionary_;
+  const GlobalTypes globalTypes_;
+  VirtualMachine &virtualMachine_;
+  const Config &cfg_;
+};
+```
+
+Note the constructor. It takes a `VirtualMachine` class and a `Config` struct. Recall that we instantiated the `VirutalMachine` class in the base9 [`run` function]. The `Config` struct is in [b9/include/b9/VirtualMachine.hpp], and is defined as follows:
+
+[`run` function]: #the-run-function
+[b9/include/b9/VirtualMachine.hpp]: https://github.com/b9org/b9/blob/master/b9/include/b9/VirtualMachine.hpp
+
+```cpp
+struct Config {
+  std::size_t maxInlineDepth = 0;  //< The JIT's max inline depth
+  bool jit = false;                //< Enable the JIT
+  bool directCall = false;         //< Enable direct JIT to JIT calls
+  bool passParam = false;          //< Pass arguments in CPU registers
+  bool lazyVmState = false;        //< Simulate the VM state
+  bool debug = false;              //< Enable debug code
+  bool verbose = false;            //< Enable verbose printing and tracing
+};
+```
+
+We use the `Config` struct to configure the JIT with a number of settings, all of which are set upon running the VM. Recall running `./b9run/b9run -help`. All of the fields in the `Config` struct are configurable options that can be used when running the JIT. Now let's take a look at the `Compiler` class, itself:
+
+`TR::TypeDictionary` allows us to define which types are supported by the frontend language. It's used by the `MethodBuilder` class in OMR JitBuilder. We define our supported types in [b9/include/b9/compiler/GlobalTypes.hpp] using `TR::TypeDictionary` as shown below:
+
+[b9/include/b9/compiler/GlobalTypes.hpp]: https://github.com/b9org/b9/blob/master/b9/include/b9/compiler/GlobalTypes.hpp
+
+```cpp
+/// A collection of basic, built in types.
+class GlobalTypes {
+ public:
+  GlobalTypes(TR::TypeDictionary &td);
+
+  TR::IlType *addressPtr;
+  TR::IlType *int64Ptr;
+  TR::IlType *int32Ptr;
+  TR::IlType *int16Ptr;
+
+  TR::IlType *stackElement;
+  TR::IlType *stackElementPtr;
+  TR::IlType *instruction;
+  TR::IlType *instructionPtr;
+
+  TR::IlType *operandStack;
+  TR::IlType *operandStackPtr;
+  TR::IlType *executionContext;
+  TR::IlType *executionContextPtr;
+};
+```
+
+
+### The `generateCode` function
+
 Next we'll take a look in [b9/src/Compiler.cpp] at the `Compiler::generateCode` function:
 
 [b9/src/Compiler.cpp]: https://github.com/b9org/b9/blob/master/b9/src/Compiler.cpp
 
-```c++
+```cpp
 JitFunction Compiler::generateCode(const std::size_t functionIndex) {
   const FunctionDef *function = virtualMachine_.getFunction(functionIndex);
   MethodBuilder methodBuilder(virtualMachine_, functionIndex);
@@ -698,6 +908,23 @@ The `rc` value is set to 0 and should remain as 0 through the `compileMethodBuil
 The return value is simply a pointer to a uint8_t, which serves as the entry point into our Jitted function. 
 
 `generateCode` is currently only called by the VM function `generateAllCode`,  because thus far we've only implemented the ability to JIT compile either everything or nothing.
+
+
+### IL and JitBuilder
+
+The first step towards JIT compilation is defining an [intermediate language]. This is the stage of compilation between the bytecodes and the native machine code. Normally, this would be a huge pain in the butt, but we've got JitBuilder, which does it for us! Let's explore how JitBuilder can help us set up the JIT! 
+
+```cpp
+if (cfg_.jit) {
+  auto ok = initializeJit();
+  if (!ok) {
+    throw std::runtime_error{"Failed to init JIT"};
+  }
+}
+```
+
+The first thing we need to do is to call the `initializeJit()` function.
+
 
 
 ### JIT Features
