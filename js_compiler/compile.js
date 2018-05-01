@@ -336,9 +336,42 @@ function FirstPassCodeGen() {
 	this.compile = function (syntax) {
 		this.module = new Module();
 		var func = new FunctionDefinition(null); // top level
+		this.augmentAST(syntax);
 		this.handleBody(func, syntax.body);
 		return this.module;
 	};
+
+	this.augmentAST = function (syntax) { // this function roughly follows a no-goal BFS tree traversal approach
+		var openNodes = [syntax]; //initially the root node, which is the top level "Program" node. this contains a list of "todo" nodes
+		//var closedNodes = []; //to keep track of visited nodes. so far it doesn't seem i need it
+		var currentNode, childNode, grandChildNode; //the node we popped from openNodes, and its child and grand child node. this is getting weird.
+		var i, j; //for the loops
+		while (openNodes.length > 0){
+			currentNode = openNodes.pop();
+			for (i in currentNode){ 								
+				if (i == 'parentNode'){  								// the most important step to ensure that you don't go around in a circle
+					continue;
+				}
+				childNode = currentNode[i]; 						
+				if (childNode instanceof Array){						// array type would mean we are in a body, block statement, parameter list, etc.
+					for (j in childNode){
+						grandChildNode = childNode[j];
+						if (grandChildNode instanceof Object){
+							grandChildNode.parentNode = currentNode;	// grandchild node's parent are being set as the grandparent, since, for example, a VariableDeclarator's parent will be "VariableDeclarations", and I think it will be more useful to set parent as "FunctionDeclaration" to access the params.
+							openNodes.push(grandChildNode);
+						}
+						else {
+							openNodes.push(grandChildNode); 			// perhaps the grandchildnode is another array, so we will come back to it later. otherwise it's probably a terminal node.	
+						}
+					}
+				}
+				else if (null != childNode && childNode.hasOwnProperty('type')){ //check if 'type' attribute exists
+					childNode.parentNode = currentNode;
+					openNodes.push(childNode);
+				}
+			}
+		}
+	}
 
 	this.handleBody = function (func, body) {
 		var me = this;
