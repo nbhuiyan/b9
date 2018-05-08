@@ -1,3 +1,13 @@
-function b9main() {
-    b9PrintString("Hello World!");
+function Inner() {
+    return 6;
 }
+
+function Outer() {
+    function Inner() {
+        return 1;
+    }
+    return Inner() + 1;
+}
+
+b9PrintNumber(Outer());
+b9PrintNumber(Inner());

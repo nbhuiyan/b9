@@ -125,6 +125,73 @@ var SymbolTable = function () {
 	}
 }
 
+function GlobalContext() {
+	// index 0 is reserved for the script body!
+	this.nextFunctionId = 1;
+}
+
+function BlockEntry(globalContext) {
+
+	this.globalContext = globalContext;
+	this.functionTable = {};
+
+	this.lookup = function (symbol) {
+		var id = this.functionTable[symbol];
+		if (id != undefined) {
+			return { type: "function", id: id};
+		}
+		// console.warn("Did not find symbol: " + symbol + " in: " + JSON.stringify(this.functionTable));
+		return undefined;
+	}
+
+	this.defineFunction = function (symbol) {
+		this.functionTable[symbol] = globalContext.nextFunctionId;
+		globalContext.nextFunctionId++;
+		return this.lookup(symbol);
+	}
+
+};
+
+function BlockContext(globalContext) {
+
+	this.stack = [];
+
+	this.push = function (entry) {
+		if (entry == undefined) {
+			entry = new BlockEntry();
+		}
+		this.stack.push(entry);
+	}
+
+	this.pop = function() {
+		this.stack.pop();
+	}
+
+	this.defineFunction = function(symbol) {
+		return this.stack[this.stack.length - 1].defineFunction(symbol);
+	}
+
+	this.lookup = function(symbol) {
+		var result = undefined;
+		var i = 0;
+
+		// console.log("lookup: " + symbol + " in: " + JSON.stringify(this.stack));
+	
+		for (; i < this.stack.length; i++) {
+			result = this.stack[this.stack.length - i - 1].lookup(symbol);
+			if (result != undefined) {
+				result.hops = i;
+				break;
+			}
+		}
+		if (result == undefined) {
+			throw new Error("could not find symbol: " + symbol);
+		}
+	
+		return result;
+	}
+}
+
 var LabelTable = function () {
 
 	this.table = [];
@@ -149,15 +216,12 @@ var LabelTable = function () {
 
 };
 
-var LexicalContext = function (outer) {
-	new SymbolTable();
-	this.outer = outer;
-};
-
 /// A section of code. CodeBody has information about args and registers, but no information about indexes or it's name.
 /// The name-to-index mapping is managed externally, by the module's FunctionTable. Eventually, the args and registers
 /// might move to a lexical environment, and this will become a simple bytecode array.
-function FunctionDefinition(outer) {
+function FunctionDefinition(outer, name, index) {
+	this.name = name;
+	this.index = index;
 	this.args = new SymbolTable();
 	this.regs = new SymbolTable();
 	this.labels = new LabelTable();
@@ -267,15 +331,14 @@ function FunctionTable() {
 };
 
 function Module() {
-
 	this.resolved = false;
-	this.functions = new FunctionTable();
+	this.functions = [];
 	this.strings = new SymbolTable();
 
 	/// After the module has been entirely built up, resolve any undefined references.
 	this.resolve = function () {
 		var me = this;
-		this.functions.forEach(function (name, index, body) {
+		this.functions.forEach(function (body) {
 			if (!body) {
 				throw "Undefined function reference: " + name;
 			}
@@ -307,17 +370,17 @@ function Module() {
 	this.outputFunctionSection = function (out) {
 		var me = this;
 		outputUInt32(out, 1); // the section code.
-		outputUInt32(out, this.functions.bodies.length);
-		this.functions.forEach(function (name, index, body) {
-			me.outputFunction(out, name, index, body);
-		});
+		outputUInt32(out, this.functions.length);
+		for (var i = 0; i < this.functions.length; ++i) {
+			var func = this.functions[i];
+			console.log("generating " + i + ": " + func.name + " " + func.index);
+
+			outputString(out, func.name);
+			outputUInt32(out, func.index);
+			func.output(out);
+		}
 	}
 
-	this.outputFunction = function (out, name, index, body) {
-		outputString(out, name);
-		outputUInt32(out, index);
-		body.output(out);
-	}
 
 	this.outputStringSection = function (out) {
 		outputUInt32(out, 2); // the section code.
@@ -330,14 +393,18 @@ function Module() {
 
 function FirstPassCodeGen() {
 
+	this.globalContext = new GlobalContext();
+    this.blockStack = new BlockContext(this.globalContext);
 	this.module = undefined;
 	this.func = undefined;
 
 	this.compile = function (syntax) {
 		this.module = new Module();
-		var func = new FunctionDefinition(null); // top level
+		var func = new FunctionDefinition(null, "<body>", 0); // top level
+		this.module.functions.push(func);
 		this.augmentAST(syntax);
 		this.handleBody(func, syntax.body);
+		func.instructions.push(new Instruction("END_SECTION", 0));
 		return this.module;
 	};
 
@@ -375,9 +442,12 @@ function FirstPassCodeGen() {
 
 	this.handleBody = function (func, body) {
 		var me = this;
+		this.blockStack.push(new BlockEntry(this.globalContext));
+		console.log("Entering body: " + JSON.stringify(this.blockStack));
 		body.forEach(function (element) {
 			me.handle(func, element);
 		});
+		this.blockStack.pop();
 	}
 
 	this.handle = function (func, element) {
@@ -422,8 +492,11 @@ function FirstPassCodeGen() {
 		func.instructions.push(new Instruction("POP_INTO_VAR", index));
 	}
 
-	this.handleFunctionDeclaration = function (func, declaration) {
-		var inner = this.module.functions.newFunctionDefinition(declaration.id.name, func);
+	this.handleFunctionDeclaration = function (outerFunc, declaration) {
+		var symbol = this.blockStack.defineFunction(declaration.id.name);
+		console.log("defining function: " + JSON.stringify(symbol));
+		var inner = new FunctionDefinition(outerFunc, declaration.id.name, symbol.id);
+		this.module.functions.push(inner);
 		declaration.params.forEach(function (param) {
 			inner.args.get(param.name);
 		});
@@ -623,13 +696,10 @@ function FirstPassCodeGen() {
 	};
 
 	this.emitFunctionCall = function (func, expression) {
-		// TODO: what is this doing?
-		expression.arguments.forEach(function (element) {
-			element.isParameter = true;
-		});
+		var symbol = this.blockStack.lookup(expression.callee.name);
+		if (symbol.type != "function") throw Error("Target not a direct function call: " + JSON.stringify(symbol));
 		this.handleBody(func, expression.arguments);
-		var target = this.module.functions.get(expression.callee.name);
-		func.instructions.push(new Instruction("FUNCTION_CALL", target));
+		func.instructions.push(new Instruction("FUNCTION_CALL", symbol.id));
 	}
 
 	this.emitPrimitiveCall = function (func, expression) {
@@ -731,12 +801,13 @@ function FirstPassCodeGen() {
 ///  1. Parse -- translate a JS program to a syntax tree.
 ///  2. Compile -- first pass compilation of the program to a module.
 ///  3. resolve -- final stage of linking up unresolved reference in the input program.
-function compile(code, output, verbose) {
+function compile(code) {
 	var syntax = esprima.parse(code);
 	var compiler = new FirstPassCodeGen();
 	var module = compiler.compile(syntax);
 	module.resolve();
 	module.output(output);
+	// console.log(JSON.stringify(module));
 	return true;
 };
 
