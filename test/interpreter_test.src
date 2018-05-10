@@ -178,13 +178,13 @@ function helper_c(c) {
     return c+3;
 }
 
+function helper_b(b) {
+    return b+1;
+}
+
 function helper_a(a) {
     a = helper_c(helper_b(a));
     return a;
-}
-
-function helper_b(b) {
-    return b+1;
 }
 
 function test_call() {

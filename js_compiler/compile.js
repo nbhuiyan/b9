@@ -36,9 +36,9 @@ var OperatorCode = Object.freeze({
 	"POP_INTO_VAR": 8,
 	"INT_ADD": 9,
 	"INT_SUB": 10,
-  	"INT_MUL": 11,
-  	"INT_DIV": 12,
-  	"INT_PUSH_CONSTANT": 13,
+	"INT_MUL": 11,
+	"INT_DIV": 12,
+	"INT_PUSH_CONSTANT": 13,
 	"INT_NOT": 14,
 	"INT_JMP_EQ": 15,
 	"INT_JMP_NEQ": 16,
@@ -125,6 +125,74 @@ var SymbolTable = function () {
 	}
 }
 
+function GlobalContext() {
+	// index 0 is reserved for the script body!
+	this.nextFunctionId = 1;
+}
+
+function BlockEntry(globalContext) {
+
+	this.globalContext = globalContext;
+	this.functionTable = {};
+
+	this.lookup = function (symbol) {
+		var id = this.functionTable[symbol];
+		if (id != undefined) {
+			return { type: "function", id: id };
+		}
+		// console.warn("Did not find symbol: " + symbol + " in: " + JSON.stringify(this.functionTable));
+		return undefined;
+	}
+
+	this.defineFunction = function (symbol) {
+		this.functionTable[symbol] = globalContext.nextFunctionId;
+		globalContext.nextFunctionId++;
+		return this.lookup(symbol);
+	}
+
+};
+
+function BlockContext(globalContext) {
+
+	this.stack = [];
+
+	this.push = function (entry) {
+		if (entry == undefined) {
+			entry = new BlockEntry();
+		}
+		this.stack.push(entry);
+		return entry;
+	}
+
+	this.pop = function () {
+		return this.stack.pop();
+	}
+
+	this.defineFunction = function (symbol) {
+		return this.stack[this.stack.length - 1].defineFunction(symbol);
+	}
+
+	this.lookup = function (symbol) {
+		var result = undefined;
+		var i = 0;
+
+		// console.log("lookup: " + symbol + " in: " + JSON.stringify(this.stack));
+
+		for (; i < this.stack.length; i++) {
+			result = this.stack[this.stack.length - i - 1].lookup(symbol);
+			if (result != undefined) {
+				result.hops = i;
+				break;
+			}
+		}
+		if (result == undefined) {
+			throw new Error("could not find symbol: " + symbol);
+		}
+
+		return result;
+	}
+}
+
 var LabelTable = function () {
 
 	this.table = [];
@@ -149,15 +217,12 @@ var LabelTable = function () {
 
 };
 
-var LexicalContext = function (outer) {
-	new SymbolTable();
-	this.outer = outer;
-};
-
 /// A section of code. CodeBody has information about args and registers, but no information about indexes or it's name.
 /// The name-to-index mapping is managed externally, by the module's FunctionTable. Eventually, the args and registers
 /// might move to a lexical environment, and this will become a simple bytecode array.
-function FunctionDefinition(outer) {
+function FunctionDefinition(outer, name, index) {
+	this.name = name;
+	this.index = index;
 	this.args = new SymbolTable();
 	this.regs = new SymbolTable();
 	this.labels = new LabelTable();
@@ -267,15 +332,14 @@ function FunctionTable() {
 };
 
 function Module() {
-
 	this.resolved = false;
-	this.functions = new FunctionTable();
+	this.functions = [];
 	this.strings = new SymbolTable();
 
 	/// After the module has been entirely built up, resolve any undefined references.
 	this.resolve = function () {
 		var me = this;
-		this.functions.forEach(function (name, index, body) {
+		this.functions.forEach(function (body) {
 			if (!body) {
 				throw "Undefined function reference: " + name;
 			}
@@ -307,17 +371,17 @@ function Module() {
 	this.outputFunctionSection = function (out) {
 		var me = this;
 		outputUInt32(out, 1); // the section code.
-		outputUInt32(out, this.functions.bodies.length);
-		this.functions.forEach(function (name, index, body) {
-			me.outputFunction(out, name, index, body);
-		});
+		outputUInt32(out, this.functions.length);
+		for (var i = 0; i < this.functions.length; ++i) {
+			var func = this.functions[i];
+			//console.log("generating " + i + ": " + func.name + " " + func.index);
+
+			outputString(out, func.name);
+			outputUInt32(out, func.index);
+			func.output(out);
+		}
 	}
 
-	this.outputFunction = function (out, name, index, body) {
-		outputString(out, name);
-		outputUInt32(out, index);
-		body.output(out);
-	}
 
 	this.outputStringSection = function (out) {
 		outputUInt32(out, 2); // the section code.
@@ -330,47 +394,59 @@ function Module() {
 
 function FirstPassCodeGen() {
 
+	this.globalContext = new GlobalContext();
+	this.blockStack = new BlockContext(this.globalContext);
 	this.module = undefined;
 	this.func = undefined;
 
 	this.compile = function (syntax) {
 		this.module = new Module();
-		var func = new FunctionDefinition(null); // top level
+		var func = new FunctionDefinition(null, "<body>", 0); // top level
+		this.module.functions.push(func);
 		this.augmentAST(syntax);
+		this.blockStack.push(syntax.block);
 		this.handleBody(func, syntax.body);
+		func.instructions.push(new Instruction("END_SECTION", 0));
+		this.blockStack.pop();
 		return this.module;
 	};
 
 	this.augmentAST = function (syntax) { // this function roughly follows a no-goal BFS tree traversal approach
-		var openNodes = [syntax]; //initially the root node, which is the top level "Program" node. this contains a list of "todo" nodes
-		//var closedNodes = []; //to keep track of visited nodes. so far it doesn't seem i need it
-		var currentNode, childNode, grandChildNode; //the node we popped from openNodes, and its child and grand child node. this is getting weird.
-		var i, j; //for the loops
-		while (openNodes.length > 0){
-			currentNode = openNodes.pop();
-			for (i in currentNode){ 								
-				if (i == 'parentNode'){  								// the most important step to ensure that you don't go around in a circle
-					continue;
-				}
-				childNode = currentNode[i]; 						
-				if (childNode instanceof Array){						// array type would mean we are in a body, block statement, parameter list, etc.
-					for (j in childNode){
-						grandChildNode = childNode[j];
-						if (grandChildNode instanceof Object){
-							grandChildNode.parentNode = currentNode;	// grandchild node's parent are being set as the grandparent, since, for example, a VariableDeclarator's parent will be "VariableDeclarations", and I think it will be more useful to set parent as "FunctionDeclaration" to access the params.
-							openNodes.push(grandChildNode);
-						}
-						else {
-							openNodes.push(grandChildNode); 			// perhaps the grandchildnode is another array, so we will come back to it later. otherwise it's probably a terminal node.	
-						}
-					}
-				}
-				else if (null != childNode && childNode.hasOwnProperty('type')){ //check if 'type' attribute exists
-					childNode.parentNode = currentNode;
-					openNodes.push(childNode);
-				}
+		var queue = [syntax]; //initially the root node, which is the top level "Program" node. this contains a list of "todo" nodes
+		var node; //the node we popped from openNodes, and its child and grand child node. this is getting weird.
+		var globalContext = new GlobalContext();
+		var blockStack = new BlockContext(globalContext);
+
+		var body = queue.shift();
+		var blockStack = [];
+		
+		while (queue.length > 0) {
+			node = queue.shift();
+			switch (node.type) {
+				case "Program":
+				case "BlockStatement":
+					node.block = new BlockEntry(globalContext);
+					blockStack.push(node.block);
+				
+					queue = queue.concat(node.body);
+					queue.push({ type: "EndBlockStatement", block: node.block });
+					//console.log("The queue is now: " + JSON.stringify(queue, null, 2));
+					break;
+				case "EndBlockStatement":
+					var b = blockStack.pop();
+					if (b != node.block) { throw new Error("MISMATCHED PUSH/POP block"); }
+					break;
+				case "FunctionDeclaration":
+					//console.log("!!! defining: " +  node.type);
+					blockStack.defineFunction(node.id.name);
+					queue.push
+					break;
+				default:
+					break;
 			}
 		}
+
+		return syntax;
 	}
 
 	this.handleBody = function (func, body) {
@@ -422,8 +498,11 @@ function FirstPassCodeGen() {
 		func.instructions.push(new Instruction("POP_INTO_VAR", index));
 	}
 
-	this.handleFunctionDeclaration = function (func, declaration) {
-		var inner = this.module.functions.newFunctionDefinition(declaration.id.name, func);
+	this.handleFunctionDeclaration = function (outerFunc, declaration) {
+		var symbol = this.blockStack.lookup(declaration.id.name);
+		console.log("defining function: " + JSON.stringify(symbol));
+		var inner = new FunctionDefinition(outerFunc, declaration.id.name, symbol.id);
+		this.module.functions.push(inner);
 		declaration.params.forEach(function (param) {
 			inner.args.get(param.name);
 		});
@@ -554,7 +633,10 @@ function FirstPassCodeGen() {
 	};
 
 	this.handleBlockStatement = function (func, decl) {
+		this.blockStack.push(decl.block);
+		console.log("Entering body: " + JSON.stringify(this.blockStack));
 		this.handleBody(func, decl.body);
+		this.blockStack.pop();
 		// TODO: Missing drop?
 	}
 
@@ -623,13 +705,10 @@ function FirstPassCodeGen() {
 	};
 
 	this.emitFunctionCall = function (func, expression) {
-		// TODO: what is this doing?
-		expression.arguments.forEach(function (element) {
-			element.isParameter = true;
-		});
+		var symbol = this.blockStack.lookup(expression.callee.name);
+		if (symbol.type != "function") throw Error("Target not a direct function call: " + JSON.stringify(symbol));
 		this.handleBody(func, expression.arguments);
-		var target = this.module.functions.get(expression.callee.name);
-		func.instructions.push(new Instruction("FUNCTION_CALL", target));
+		func.instructions.push(new Instruction("FUNCTION_CALL", symbol.id));
 	}
 
 	this.emitPrimitiveCall = function (func, expression) {
@@ -731,12 +810,14 @@ function FirstPassCodeGen() {
 ///  1. Parse -- translate a JS program to a syntax tree.
 ///  2. Compile -- first pass compilation of the program to a module.
 ///  3. resolve -- final stage of linking up unresolved reference in the input program.
-function compile(code, output, verbose) {
+function compile(code) {
 	var syntax = esprima.parse(code);
 	var compiler = new FirstPassCodeGen();
-	var module = compiler.compile(syntax);
-	module.resolve();
-	module.output(output);
+	//var module = compiler.compile(syntax);
+	syntax = compiler.augmentAST(syntax);
+	//module.resolve();
+	//module.output(output);
+	console.log(JSON.stringify(syntax, null, 2));
 	return true;
 };
 
