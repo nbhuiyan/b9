@@ -1,10 +1,17 @@
+
+Inner();
+Outer();
+
+
 function Outer() {
-    function Inner() {
-        return 1;
-    }
     return Inner() + 1;
+    function Inner() {
+        return Outer();
+    }
+
 }
 
 function Inner() {
     return 6;
 }
+

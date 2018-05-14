@@ -412,43 +412,35 @@ function FirstPassCodeGen() {
 	};
 
 	this.augmentAST = function (syntax) {
-		var queue = [syntax];
-		var node;
-		var globalContext = new GlobalContext();
-		var blockStack = new BlockContext(globalContext);
-		var temp;
-		//var body = queue.shift();
-		//var blockStack = [];
+		var global = new GlobalContext();
+		syntax.block = new BlockEntry(global);
+		var stack = [{ todo: Object.assign([], syntax.body), block: syntax.block }];
 
-		while (queue.length > 0) {
-			// console.log("\n\n\nThe queue is now: " + JSON.stringify(queue, null, 2));
-			node = queue.shift();
+		while (stack.length != 0) {
+			var work = stack[stack.length - 1];
+
+			if (work.todo.length == 0) {
+				stack.pop();
+				continue;
+			}
+
+			var block = work.block;
+			var node = work.todo.shift();
+
 			switch (node.type) {
-				case "Program":
 				case "BlockStatement":
-					console.log("!!! Entering: "+ node.type);
-					node.block = new BlockEntry(globalContext);
-					blockStack.push(node.block);
-					queue.unshift({ type: "EndBlockStatement", block: node.block });
-					queue = node.body.concat(queue);
-					
-					//console.log("The queue is now: " + JSON.stringify(queue, null, 2));
-					break;
-				case "EndBlockStatement":
-					console.log("!!! Exiting: " + JSON.stringify(node));
-					var b = blockStack.pop();
-					if (b != node.block) { throw new Error("MISMATCHED PUSH/POP block: " + JSON.stringify(b) + JSON.stringify(node.block)); }
+					block = new BlockEntry(global);
+					node.block = block;
+					work = { todo: Object.assign([], node.body), block: block };
+					stack.push(work);
 					break;
 				case "FunctionDeclaration":
-					console.log("!!! defining: " +  node.id.name);
-					blockStack.defineFunction(node.id.name);
-					queue.unshift(node.body); //unshift() returns the length of the array
+					block.defineFunction(node.id.name);
+					work.todo.unshift(node.body);
 					break;
 				default:
-					break;
 			}
 		}
-
 		return syntax;
 	}
 
@@ -817,10 +809,10 @@ function compile(code) {
 	var syntax = esprima.parse(code);
 	var compiler = new FirstPassCodeGen();
 	//compiler.compile(syntax);
-	//var module = compiler.compile(syntax);
-	syntax = compiler.augmentAST(syntax);
-	//module.resolve();
-	//module.output(output);
+	var module = compiler.compile(syntax);
+	// syntax = compiler.augmentAST(syntax);
+	module.resolve();
+	module.output(output);
 	//console.log(JSON.stringify(syntax, null, 2));
 	return true;
 };
@@ -833,7 +825,7 @@ function main() {
 
 	inputPath = process.argv[2];
 	outputPath = process.argv[3];
-	
+
 	var code = fs.readFileSync(__dirname + "/b9stdlib.src", 'utf-8');
 	code += fs.readFileSync(inputPath, 'utf-8');
 
