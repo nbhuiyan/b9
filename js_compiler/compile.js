@@ -132,15 +132,23 @@ function GlobalContext() {
 
 function BlockEntry(globalContext) {
 
-	this.globalContext = globalContext;
 	this.functionTable = {};
+	this.localTable = new SymbolTable();
 
 	this.lookup = function (symbol) {
-		var id = this.functionTable[symbol];
-		if (id != undefined) {
+
+		var id = undefined;
+
+		id = this.localTable.lookup(symbol);
+		if (id !== undefined) {
+			return { type: "local", id: id };
+		}
+
+		id = this.functionTable[symbol];
+		if (id !== undefined) {
 			return { type: "function", id: id };
 		}
-		// console.warn("Did not find symbol: " + symbol + " in: " + JSON.stringify(this.functionTable));
+		console.warn("Did not find symbol: " + symbol + " in: " + JSON.stringify(this));
 		return undefined;
 	}
 
@@ -150,6 +158,9 @@ function BlockEntry(globalContext) {
 		return this.lookup(symbol);
 	}
 
+	this.defineLocal = function (symbol) {
+		return this.localTable.get(symbol);
+	}
 };
 
 function BlockContext(globalContext) {
@@ -158,7 +169,7 @@ function BlockContext(globalContext) {
 
 	this.push = function (entry) {
 		if (entry == undefined) {
-			entry = new BlockEntry();
+			throw new Error("Entering undefined block entry");
 		}
 		this.stack.push(entry);
 		return entry;
@@ -173,25 +184,93 @@ function BlockContext(globalContext) {
 	}
 
 	this.lookup = function (symbol) {
-		var result = undefined;
 		var i = 0;
-
-		// console.log("lookup: " + symbol + " in: " + JSON.stringify(this.stack));
-
 		for (; i < this.stack.length; i++) {
-			result = this.stack[this.stack.length - i - 1].lookup(symbol);
+			var result = this.stack[this.stack.length - i - 1].lookup(symbol);
 			if (result != undefined) {
-				result.hops = i;
-				break;
+				return result;
 			}
 		}
-		if (result == undefined) {
-			throw new Error("could not find symbol: " + symbol);
-		}
-
-		return result;
+		return undefined;
 	}
 }
+
+function FunctionEntry(globalContext) {
+
+	this.blockContext = new BlockContext(globalContext);
+	this.parameterTable = new SymbolTable();
+
+	this.currentBlock = function () {
+		return this.blockContext.stack[this.blockContext.stack.length - 1];
+	}
+
+	this.enterBlock = function(blockEntry) {
+		return this.blockContext.push(blockEntry);
+	}
+
+	this.exitBlock = function() {
+		this.blockContext.pop();
+	}
+
+	this.defineParameter = function (symbol) {
+		return this.parameterTable.get(symbol);
+	}
+
+	this.lookup = function (name) {
+		var symbol = this.blockContext.lookup(name);
+		if (symbol != undefined) {
+			return symbol;
+		}
+
+		var id = this.parameterTable.lookup(name);
+		if (id != undefined) {
+			return { type: "parameter", id: id };
+		}
+
+		return undefined;
+	}
+};
+
+function FunctionContext() {
+	this.stack = [];
+
+	this.currentFunction = function() {
+		return this.stack[this.stack.length - 1];
+	}
+
+	this.enterFunction = function (functionEntry) {
+		this.stack.push(functionEntry);
+	}
+
+	this.exitFunction = function () {
+		this.stack.pop();
+	}
+
+	this.currentBlock = function() {
+		return this.currentFunction().currentBlock();
+	}
+
+	this.enterBlock = function (blockEntry) {
+		this.currentFunction().enterBlock(blockEntry);
+	}
+
+	this.exitBlock = function () {
+		this.currentFunction().exitBlock();
+	}
+
+	this.lookup = function (symbol) {
+		var i = 0;
+		for (; i < this.stack.length; i++) {
+			var result = this.stack[this.stack.length - i - 1].lookup(symbol);
+			if (result != undefined) {
+				result.hops = i;
+				return result;
+			}
+		}
+		throw new Error("could not find symbol: " + symbol + " in:\n" + JSON.stringify(this.stack, null, 2));
+		return undefined;
+	}
+};
 
 var LabelTable = function () {
 
@@ -290,47 +369,6 @@ function FunctionDefinition(outer, name, index) {
 
 };
 
-/// The function table tracks function names and indexes. When a new name is encountered, the table automatically
-/// creates a new stub function definition. Eventually, it's expected that the definition will be filled in, later in
-/// the parsed script. Leaving any function undefined is an error.
-function FunctionTable() {
-
-	this.names = new SymbolTable();
-	this.bodies = [];
-
-	/// Look up the index of a 
-	this.indexof = function (name) {
-		return names.table.get(name);
-	};
-
-	/// Lookup a function's ID by name. If the function name hasn't been encountered before, reserve an ID for the name.
-	this.get = function (name) {
-		var id = this.names.get(name);
-		if (!this.bodies[id]) {
-			this.bodies[id] = null;
-		}
-		return id;
-	};
-
-	this.newFunctionDefinition = function (name, context) {
-		var id = this.names.get(name);
-		if (this.bodies[id]) {
-			throw "Error: function defined twice";
-		}
-		var func = new FunctionDefinition(context);
-		this.bodies[id] = func;
-		return func;
-	}
-
-	/// callback(name, index, body)
-	this.forEach = function (callback) {
-		var me = this;
-		this.names.forEach(function (name, index) {
-			callback(name, index, me.bodies[index]);
-		});
-	};
-};
-
 function Module() {
 	this.resolved = false;
 	this.functions = [];
@@ -395,7 +433,7 @@ function Module() {
 function FirstPassCodeGen() {
 
 	this.globalContext = new GlobalContext();
-	this.blockStack = new BlockContext(this.globalContext);
+	this.functionContext = new FunctionContext(this.globalContext);
 	this.module = undefined;
 	this.func = undefined;
 
@@ -404,17 +442,21 @@ function FirstPassCodeGen() {
 		var func = new FunctionDefinition(null, "<body>", 0); // top level
 		this.module.functions.push(func);
 		this.augmentAST(syntax);
-		this.blockStack.push(syntax.block);
+		this.functionContext.enterFunction(syntax.functionEntry);
+		this.functionContext.enterBlock(syntax.blockEntry);
 		this.handleBody(func, syntax.body);
 		func.instructions.push(new Instruction("END_SECTION", 0));
-		this.blockStack.pop();
+		this.functionContext.exitFunction();
 		return this.module;
 	};
 
 	this.augmentAST = function (syntax) {
 		var global = new GlobalContext();
-		syntax.block = new BlockEntry(global);
-		var stack = [{ todo: Object.assign([], syntax.body), block: syntax.block }];
+		
+		syntax.functionEntry = new FunctionEntry(global);
+		syntax.blockEntry = new BlockEntry(global);
+
+		var stack = [{ todo: Object.assign([], syntax.body), block: syntax.blockEntry }];
 
 		while (stack.length != 0) {
 			var work = stack[stack.length - 1];
@@ -428,19 +470,34 @@ function FirstPassCodeGen() {
 			var node = work.todo.shift();
 
 			switch (node.type) {
+				case "FunctionDeclaration":
+					node.functionEntry = new FunctionEntry(global);
+					block.defineFunction(node.id.name);
+	
+					var innerBlockEntry = new BlockEntry(global);
+					node.params.forEach(function (param) {
+						// TODO: Use Parameter Table from function entry
+						innerBlockEntry.defineLocal(param.name);
+					});
+					node.body.blockEntry = innerBlockEntry;
+					work = { todo: Object.assign([], node.body.body), block: innerBlockEntry };
+					stack.push(work);
+				break;
 				case "BlockStatement":
 					block = new BlockEntry(global);
-					node.block = block;
+					node.blockEntry = block;
 					work = { todo: Object.assign([], node.body), block: block };
 					stack.push(work);
 					break;
-				case "FunctionDeclaration":
-					block.defineFunction(node.id.name);
-					work.todo.unshift(node.body);
+				case "VariableDeclaration":
+					node.declarations.forEach(function (d) {
+						block.defineLocal(d.id.name);
+					});
 					break;
 				default:
 			}
 		}
+		console.log(JSON.stringify(syntax, null, 2));
 		return syntax;
 	}
 
@@ -484,18 +541,34 @@ function FirstPassCodeGen() {
 	}
 
 	this.emitPushFromVar = function (func, name) {
-		var index = func.localIndex(name);
-		func.instructions.push(new Instruction("PUSH_FROM_VAR", index));
+		var symbol = this.functionContext.lookup(name);
+
+		// if (symbol.hops > 0) {
+		// 	throw new Error("Cannot access across scopes: " + symbol);
+		// }
+		if (symbol.type != "local") {
+			throw new Error("Cannot read from non-local: " + symbol);
+		}
+
+		func.instructions.push(new Instruction("PUSH_FROM_VAR", symbol.id));
 	}
 
 	this.emitPopIntoVar = function (func, name) {
-		var index = func.localIndex(name);
-		func.instructions.push(new Instruction("POP_INTO_VAR", index));
+		var symbol = this.functionContext.lookup(name);
+		// if (symbol.hops > 0) {
+		// 	throw new Error("Cannot access across scopes: " + symbol);
+		// }
+		if (symbol.type != "local") {
+			throw new Error("Cannot store to non-local: " + symbol);
+		}
+
+		func.instructions.push(new Instruction("POP_INTO_VAR", symbol.id));
 	}
 
 	this.handleFunctionDeclaration = function (outerFunc, declaration) {
 		//console.log("defining function: " + JSON.stringify(symbol));
-		var symbol = this.blockStack.lookup(declaration.id.name);
+		this.functionContext.enterFunction(declaration.functionEntry);
+		var symbol = this.functionContext.lookup(declaration.id.name);
 		var inner = new FunctionDefinition(outerFunc, declaration.id.name, symbol.id);
 		this.module.functions.push(inner);
 		declaration.params.forEach(function (param) {
@@ -511,6 +584,7 @@ function FirstPassCodeGen() {
 		}
 
 		inner.instructions.push(new Instruction("END_SECTION", 0));
+		this.functionContext.exitFunction();
 	};
 
 	this.handleAssignmentExpression = function (func, expression) {
@@ -628,10 +702,10 @@ function FirstPassCodeGen() {
 	};
 
 	this.handleBlockStatement = function (func, decl) {
-		this.blockStack.push(decl.block);
-		console.log("Entering body: " + JSON.stringify(this.blockStack));
+		//console.log("Entering body: " + JSON.stringify(decl, null, 2));
+		this.functionContext.enterBlock(decl.blockEntry);
 		this.handleBody(func, decl.body);
-		this.blockStack.pop();
+		this.functionContext.exitBlock();
 		// TODO: Missing drop?
 	}
 
@@ -700,7 +774,7 @@ function FirstPassCodeGen() {
 	};
 
 	this.emitFunctionCall = function (func, expression) {
-		var symbol = this.blockStack.lookup(expression.callee.name);
+		var symbol = this.functionContext.lookup(expression.callee.name);
 		if (symbol.type != "function") throw Error("Target not a direct function call: " + JSON.stringify(symbol));
 		this.handleBody(func, expression.arguments);
 		func.instructions.push(new Instruction("FUNCTION_CALL", symbol.id));

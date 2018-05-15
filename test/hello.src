@@ -3,7 +3,7 @@ Inner();
 Outer();
 
 
-function Outer() {
+function Outer(x, y) {
     return Inner() + 1;
     function Inner() {
         return Outer();
@@ -15,3 +15,7 @@ function Inner() {
     return 6;
 }
 
+var xyz = 10;
+var xyz = 11;
+
+var x;

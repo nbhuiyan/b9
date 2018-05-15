@@ -9,3 +9,4 @@ function b9PrintNumber(a) {
 function b9PrintStack(a) {
     b9_primitive("print_stack", a);
 }
+
