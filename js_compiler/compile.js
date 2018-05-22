@@ -470,6 +470,27 @@ function FirstPassCodeGen() {
 			var node = work.todo.shift();
 
 			switch (node.type) {
+				case "ForStatement":
+					node.init.blockEntry = block;
+					if (node.init.type == "VariableDeclaration"){
+						node.init.declarations.forEach(function(d){
+							node.init.blockEntry.defineLocal(d.id.name);
+						});
+					} else {
+						node.init.blockEntry = block;
+					}
+					node.test.blockEntry = block;
+					node.update.blockEntry = block;
+					node.body.blockEntry = block;
+					work = { todo: Object.assign([], node.body), block: block};
+					stack.push(work);
+					break;
+				case "WhileStatement":
+					node.test.blockEntry = block;
+					node.body.blockEntry = block;
+					work = { todo: Object.assign([], node.body), block: block};
+					stack.push(work);
+					break;
 				case "FunctionDeclaration":
 					node.functionEntry = new FunctionEntry(global);
 					block.defineFunction(node.id.name);
@@ -494,7 +515,23 @@ function FirstPassCodeGen() {
 						block.defineLocal(d.id.name);
 					});
 					break;
+				case "IfStatement":
+					node.test.blockEntry = block;
+					if (node.alternate != null){
+						node.alternate.blockEntry = block;
+					}
+					node.consequent.blockEntry = block;
+					work = { todo: Object.assign([],node.consequent.body), block: block};
+					stack.push(work);
+					break;
+				case "ExpressionStatement":
+					node.blockEntry = block;
+					break;
+				case "ReturnStatement":
+					node.blockEntry = block;
+					break;
 				default:
+					break;
 			}
 		}
 		console.log(JSON.stringify(syntax, null, 2));
@@ -568,6 +605,7 @@ function FirstPassCodeGen() {
 	this.handleFunctionDeclaration = function (outerFunc, declaration) {
 		//console.log("defining function: " + JSON.stringify(symbol));
 		this.functionContext.enterFunction(declaration.functionEntry);
+		//this.functionContext.enterBlock(declaration.blockEntry);
 		var symbol = this.functionContext.lookup(declaration.id.name);
 		var inner = new FunctionDefinition(outerFunc, declaration.id.name, symbol.id);
 		this.module.functions.push(inner);
@@ -584,6 +622,7 @@ function FirstPassCodeGen() {
 		}
 
 		inner.instructions.push(new Instruction("END_SECTION", 0));
+		//this.functionContext.exitBlock();
 		this.functionContext.exitFunction();
 	};
 
@@ -702,7 +741,7 @@ function FirstPassCodeGen() {
 	};
 
 	this.handleBlockStatement = function (func, decl) {
-		//console.log("Entering body: " + JSON.stringify(decl, null, 2));
+		console.log("\n\n\nEntering body: " + JSON.stringify(decl, null, 2));
 		this.functionContext.enterBlock(decl.blockEntry);
 		this.handleBody(func, decl.body);
 		this.functionContext.exitBlock();
@@ -729,6 +768,7 @@ function FirstPassCodeGen() {
 	};
 
 	this.handleForStatement = function (func, statement) {
+		//this.functionContext.enterBlock(statement.blockEntry);
 		this.handle(func, statement.init);
 		var testLabel = func.labels.create();
 		var exitLabel = func.labels.create();
@@ -740,6 +780,7 @@ function FirstPassCodeGen() {
 		func.instructions.push(new Instruction("DROP"));
 		func.instructions.push(new Instruction("JMP", testLabel));
 		func.placeLabel(exitLabel);
+		//this.functionContext.exitBlock();
 	};
 
 	this.handleCallExpression = function (func, expression) {
@@ -841,6 +882,7 @@ function FirstPassCodeGen() {
 	}
 
 	this.handleIfStatement = function (func, statement) {
+		//this.functionContext.enterBlock(statement.blockEntry)
 		var alternateLabel = func.labels.create();
 		var endLabel = func.labels.create();
 		comparator = this.emitTest(func, statement.test);
@@ -858,11 +900,13 @@ function FirstPassCodeGen() {
 			this.handle(func, statement.alternate);
 		}
 		func.placeLabel(endLabel);
+		//this.functionContext.exitBlock()
 	};
 
 	this.handleEmptyStatement = function (func, statement) { };
 
 	this.handleWhileStatement = function (func, statement) {
+		//this.functionContext.enterBlock(statement.blockEntry);
 		var bodyLabel = func.createLabel();
 		var testLabel = func.createLabel();
 		func.instructions.push(new Instruction("JMP", testLabel));
@@ -871,6 +915,7 @@ function FirstPassCodeGen() {
 		func.placeLabel(testLabel);
 		var comparator = this.emitTest(func, statement.test);
 		func.instructions.push(new Instruction(JumpOperator[comparator], bodyLabel));
+		//this.functionContext.exitBlock();
 	};
 };
 
